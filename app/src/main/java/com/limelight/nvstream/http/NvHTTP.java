@@ -12,6 +12,7 @@ import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.Proxy;
 import java.net.Socket;
+import java.nio.charset.StandardCharsets;
 import java.security.KeyManagementException;
 import java.security.KeyStore;
 import java.security.KeyStoreException;
@@ -365,8 +366,14 @@ public class NvHTTP {
             details.name = "UNKNOWN";
         }
 
-        // UUID is mandatory to determine which machine is responding
-        details.uuid = getXmlString(serverInfo, "uniqueid", true);
+        // UUID is expected to identify the host. Some Sunshine setups can return an empty
+        // uniqueid, so generate a deterministic fallback based on the contacted host.
+        details.uuid = getXmlString(serverInfo, "uniqueid", false);
+        if (details.uuid == null || details.uuid.trim().isEmpty()) {
+            String fallbackSeed = baseUrlHttp.host() + ":" + baseUrlHttp.port();
+            details.uuid = UUID.nameUUIDFromBytes(fallbackSeed.getBytes(StandardCharsets.UTF_8)).toString();
+            LimeLog.warning("Host returned empty uniqueid; using fallback UUID: " + details.uuid);
+        }
 
         details.httpsPort = getHttpsPort(serverInfo);
 
