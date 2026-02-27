@@ -23,8 +23,12 @@ import java.security.SecureRandom;
 import java.security.cert.Certificate;
 import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.ListIterator;
+import java.util.Locale;
+import java.util.Set;
 import java.util.Stack;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -73,6 +77,8 @@ public class NvHTTP {
 
     // Print URL and content to logcat on debug builds
     private static boolean verbose = BuildConfig.DEBUG;
+    private static final Set<String> warnedFallbackUuidSeeds =
+            Collections.synchronizedSet(new HashSet<>());
 
     private HttpUrl baseUrlHttp;
 
@@ -358,6 +364,32 @@ public class NvHTTP {
         return new ComputerDetails.AddressTuple(address, port);
     }
 
+    private static boolean isValidMacAddress(String macAddress) {
+        return macAddress != null &&
+                !macAddress.trim().isEmpty() &&
+                !macAddress.equals("00:00:00:00:00:00");
+    }
+
+    private String generateFallbackUuid(String hostName, String macAddress, int hostHttpsPort) {
+        final String fallbackSeed;
+        if (isValidMacAddress(macAddress)) {
+            fallbackSeed = "mac:" + macAddress.replace(":", "").toLowerCase(Locale.ROOT);
+        }
+        else if (hostName != null && !hostName.trim().isEmpty()) {
+            fallbackSeed = "hostname:" + hostName.trim().toLowerCase(Locale.ROOT) + ":" + hostHttpsPort;
+        }
+        else {
+            fallbackSeed = "endpoint:" + baseUrlHttp.host().toLowerCase(Locale.ROOT) + ":" + baseUrlHttp.port();
+        }
+
+        String fallbackUuid = UUID.nameUUIDFromBytes(fallbackSeed.getBytes(StandardCharsets.UTF_8)).toString();
+        if (warnedFallbackUuidSeeds.add(fallbackSeed)) {
+            LimeLog.warning("Host returned empty uniqueid; using fallback UUID seed " +
+                    fallbackSeed + " -> " + fallbackUuid);
+        }
+        return fallbackUuid;
+    }
+
     public ComputerDetails getComputerDetails(String serverInfo) throws IOException, XmlPullParserException {
         ComputerDetails details = new ComputerDetails();
 
@@ -366,18 +398,15 @@ public class NvHTTP {
             details.name = "UNKNOWN";
         }
 
+        details.httpsPort = getHttpsPort(serverInfo);
+        details.macAddress = getXmlString(serverInfo, "mac", false);
+
         // UUID is expected to identify the host. Some Sunshine setups can return an empty
-        // uniqueid, so generate a deterministic fallback based on the contacted host.
+        // uniqueid, so generate a deterministic fallback from other stable host properties.
         details.uuid = getXmlString(serverInfo, "uniqueid", false);
         if (details.uuid == null || details.uuid.trim().isEmpty()) {
-            String fallbackSeed = baseUrlHttp.host() + ":" + baseUrlHttp.port();
-            details.uuid = UUID.nameUUIDFromBytes(fallbackSeed.getBytes(StandardCharsets.UTF_8)).toString();
-            LimeLog.warning("Host returned empty uniqueid; using fallback UUID: " + details.uuid);
+            details.uuid = generateFallbackUuid(details.name, details.macAddress, details.httpsPort);
         }
-
-        details.httpsPort = getHttpsPort(serverInfo);
-
-        details.macAddress = getXmlString(serverInfo, "mac", false);
 
         // FIXME: Do we want to use the current port?
         details.localAddress = makeTuple(getXmlString(serverInfo, "LocalIP", false), baseUrlHttp.port());

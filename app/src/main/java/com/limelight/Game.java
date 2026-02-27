@@ -21,6 +21,7 @@ import com.limelight.nvstream.NvConnection;
 import com.limelight.nvstream.NvConnectionListener;
 import com.limelight.nvstream.StreamConfiguration;
 import com.limelight.nvstream.http.ComputerDetails;
+import com.limelight.nvstream.http.HostHttpResponseException;
 import com.limelight.nvstream.http.NvApp;
 import com.limelight.nvstream.http.NvHTTP;
 import com.limelight.nvstream.input.ControllerPacket;
@@ -80,12 +81,15 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.security.cert.CertificateException;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.util.Locale;
+
+import org.xmlpull.v1.XmlPullParserException;
 
 
 public class Game extends Activity implements SurfaceHolder.Callback,
@@ -129,6 +133,10 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     private String appName;
     private NvApp app;
     private float desiredRefreshRate;
+    private ComputerDetails.AddressTuple sessionHostAddress;
+    private int sessionHttpsPort;
+    private X509Certificate sessionServerCert;
+    private boolean quitAttemptedOnClose;
 
     private InputCaptureProvider inputCaptureProvider;
     private int modifierFlags = 0;
@@ -486,6 +494,9 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                 new ComputerDetails.AddressTuple(host, port),
                 httpsPort, uniqueId, config,
                 PlatformBinding.getCryptoProvider(this), serverCert);
+        sessionHostAddress = new ComputerDetails.AddressTuple(host, port);
+        sessionHttpsPort = httpsPort;
+        sessionServerCert = serverCert;
         controllerHandler = new ControllerHandler(this, conn, this, prefConfig);
         keyboardTranslator = new KeyboardTranslator();
 
@@ -1082,6 +1093,12 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         if (conn != null) {
             int videoFormat = decoderRenderer.getActiveVideoFormat();
 
+            // If the stream activity is closing, ask the host to end the active app session
+            // so we don't leave an orphaned running session behind.
+            if (!(Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && isInPictureInPictureMode())) {
+                endHostSessionOnClose();
+            }
+
             displayedFailureDialog = true;
             stopConnection();
 
@@ -1138,6 +1155,33 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         }
 
         finish();
+    }
+
+    private void endHostSessionOnClose() {
+        if (quitAttemptedOnClose || sessionHostAddress == null) {
+            return;
+        }
+        quitAttemptedOnClose = true;
+
+        new Thread() {
+            @Override
+            public void run() {
+                try {
+                    NvHTTP httpConn = new NvHTTP(sessionHostAddress, sessionHttpsPort, null,
+                            sessionServerCert, PlatformBinding.getCryptoProvider(Game.this));
+                    if (httpConn.quitApp()) {
+                        LimeLog.info("Requested host app/session termination after app close");
+                    }
+                } catch (HostHttpResponseException e) {
+                    // Error 599 means the host session wasn't started by Moonlight and can't be quit here.
+                    if (e.getErrorCode() != 599) {
+                        LimeLog.warning("Unable to end host session on close: " + e.getMessage());
+                    }
+                } catch (IOException | XmlPullParserException e) {
+                    LimeLog.warning("Unable to end host session on close: " + e.getMessage());
+                }
+            }
+        }.start();
     }
 
     private void setInputGrabState(boolean grab) {

@@ -48,17 +48,38 @@ public class PcGridAdapter extends GenericGridAdapter<PcView.ComputerObject> {
         return itemList.remove(computer);
     }
 
-    @Override
-    public void populateView(View parentView, ImageView imgView, ProgressBar prgView, TextView txtView, ImageView overlayView, PcView.ComputerObject obj) {
-        imgView.setImageResource(R.drawable.ic_computer);
-        if (obj.details.state == ComputerDetails.State.ONLINE) {
-            imgView.setAlpha(1.0f);
-        }
-        else {
-            imgView.setAlpha(0.4f);
+    private ComputerDetails.State getDisplayState(PcView.ComputerObject obj) {
+        if (obj.details.state == ComputerDetails.State.UNKNOWN) {
+            // Polling can transiently mark a host unknown even when we still have a known-good
+            // active address from recent polls. Keep cards visually stable in that case.
+            if (obj.details.activeAddress != null) {
+                return ComputerDetails.State.ONLINE;
+            }
+
+            // Don't present long-lived UNKNOWN as "Refreshing" in the host grid.
+            return ComputerDetails.State.OFFLINE;
         }
 
-        if (obj.details.state == ComputerDetails.State.UNKNOWN) {
+        return obj.details.state;
+    }
+
+    @Override
+    public void populateView(View parentView, ImageView imgView, ProgressBar prgView, TextView txtView, ImageView overlayView, PcView.ComputerObject obj) {
+        TextView statusView = parentView.findViewById(R.id.grid_status);
+        ComputerDetails.State displayState = getDisplayState(obj);
+
+        imgView.setImageResource(R.drawable.ic_computer);
+        if (displayState == ComputerDetails.State.ONLINE) {
+            imgView.setAlpha(1.0f);
+        }
+        else if (displayState == ComputerDetails.State.UNKNOWN) {
+            imgView.setAlpha(0.8f);
+        }
+        else {
+            imgView.setAlpha(0.6f);
+        }
+
+        if (displayState == ComputerDetails.State.UNKNOWN) {
             prgView.setVisibility(View.VISIBLE);
         }
         else {
@@ -66,14 +87,30 @@ public class PcGridAdapter extends GenericGridAdapter<PcView.ComputerObject> {
         }
 
         txtView.setText(obj.details.name);
-        if (obj.details.state == ComputerDetails.State.ONLINE) {
-            txtView.setAlpha(1.0f);
-        }
-        else {
-            txtView.setAlpha(0.4f);
+        txtView.setAlpha(1.0f);
+
+        if (statusView != null) {
+            if (obj.details.state == ComputerDetails.State.ONLINE &&
+                    obj.details.pairState == PairingManager.PairState.NOT_PAIRED &&
+                    obj.details.serverCert == null) {
+                statusView.setText(R.string.pcview_status_pair_required);
+                statusView.setBackgroundResource(R.drawable.bg_status_pair_required);
+            }
+            else if (displayState == ComputerDetails.State.ONLINE) {
+                statusView.setText(R.string.pcview_menu_header_online);
+                statusView.setBackgroundResource(R.drawable.bg_status_online);
+            }
+            else if (displayState == ComputerDetails.State.OFFLINE) {
+                statusView.setText(R.string.pcview_menu_header_offline);
+                statusView.setBackgroundResource(R.drawable.bg_status_offline);
+            }
+            else {
+                statusView.setText(R.string.pcview_menu_header_unknown);
+                statusView.setBackgroundResource(R.drawable.bg_status_refreshing);
+            }
         }
 
-        if (obj.details.state == ComputerDetails.State.OFFLINE) {
+        if (displayState == ComputerDetails.State.OFFLINE) {
             overlayView.setImageResource(R.drawable.ic_pc_offline);
             overlayView.setAlpha(0.4f);
             overlayView.setVisibility(View.VISIBLE);
@@ -81,7 +118,8 @@ public class PcGridAdapter extends GenericGridAdapter<PcView.ComputerObject> {
         // We must check if the status is exactly online and unpaired
         // to avoid colliding with the loading spinner when status is unknown
         else if (obj.details.state == ComputerDetails.State.ONLINE &&
-                obj.details.pairState == PairingManager.PairState.NOT_PAIRED) {
+                obj.details.pairState == PairingManager.PairState.NOT_PAIRED &&
+                obj.details.serverCert == null) {
             overlayView.setImageResource(R.drawable.ic_lock);
             overlayView.setAlpha(1.0f);
             overlayView.setVisibility(View.VISIBLE);

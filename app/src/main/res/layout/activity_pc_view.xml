@@ -29,61 +29,93 @@
             android:layout_centerHorizontal="true">
             <ProgressBar
                 android:id="@+id/pcs_loading"
-                android:layout_width="75dp"
-                android:layout_height="75dp"
+                android:layout_width="64dp"
+                android:layout_height="64dp"
+                android:layout_centerHorizontal="true"
                 android:indeterminate="true"/>
+            <TextView
+                android:id="@+id/searching_title"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_below="@+id/pcs_loading"
+                android:layout_centerHorizontal="true"
+                android:layout_marginTop="14dp"
+                android:gravity="center"
+                android:textColor="#FFFFFFFF"
+                android:textSize="26sp"
+                android:textStyle="bold"
+                android:text="@string/searching_pc"/>
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_toRightOf="@+id/pcs_loading"
-                android:layout_toEndOf="@+id/pcs_loading"
-                android:layout_marginLeft="10dp"
-                android:layout_marginStart="10dp"
-                android:layout_centerVertical="true"
-                android:textAppearance="?android:attr/textAppearanceLarge"
+                android:layout_below="@+id/searching_title"
+                android:layout_centerHorizontal="true"
+                android:layout_marginTop="10dp"
                 android:gravity="center"
-                android:text="@string/searching_pc"/>
+                android:textColor="#B3FFFFFF"
+                android:textSize="16sp"
+                android:text="@string/searching_pc_hint"/>
         </RelativeLayout>
 
     </RelativeLayout>
 
     <ImageButton
         android:id="@+id/settingsButton"
-        android:layout_width="70dp"
-        android:layout_height="65dp"
+        android:layout_width="72dp"
+        android:layout_height="72dp"
+        android:background="@drawable/bg_toolbar_button"
+        android:padding="16dp"
         android:cropToPadding="false"
-        android:scaleType="fitXY"
+        android:scaleType="centerInside"
         android:layout_alignParentLeft="true"
         android:layout_alignParentStart="true"
         android:layout_alignParentTop="true"
         android:src="@drawable/ic_settings"
-        android:preferKeepClear="true"
-        style="?android:attr/borderlessButtonStyle"/>
+        android:preferKeepClear="true"/>
 
     <ImageButton
         android:id="@+id/helpButton"
-        android:layout_width="70dp"
-        android:layout_height="65dp"
+        android:layout_width="72dp"
+        android:layout_height="72dp"
+        android:background="@drawable/bg_toolbar_button"
+        android:padding="16dp"
         android:cropToPadding="false"
-        android:scaleType="fitXY"
+        android:scaleType="centerInside"
         android:layout_alignParentTop="true"
         android:layout_toRightOf="@+id/settingsButton"
         android:layout_toEndOf="@+id/settingsButton"
         android:src="@drawable/ic_help"
-        android:preferKeepClear="true"
-        style="?android:attr/borderlessButtonStyle"/>
+        android:preferKeepClear="true"/>
     
     <ImageButton
         android:id="@+id/manuallyAddPc"
-        android:layout_width="70dp"
-        android:layout_height="65dp"
+        android:layout_width="72dp"
+        android:layout_height="72dp"
+        android:background="@drawable/bg_toolbar_button"
+        android:padding="16dp"
         android:cropToPadding="false"
-        android:scaleType="fitXY"
+        android:scaleType="centerInside"
         android:layout_alignParentTop="true"
         android:layout_alignParentEnd="true"
         android:layout_alignParentRight="true"
         android:src="@drawable/ic_add"
-        android:preferKeepClear="true"
-        style="?android:attr/borderlessButtonStyle"/>
+        android:preferKeepClear="true"/>
+
+    <TextView
+        android:id="@+id/host_options_hint"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_alignParentBottom="true"
+        android:layout_centerHorizontal="true"
+        android:layout_marginBottom="10dp"
+        android:background="@drawable/bg_controls_hint"
+        android:gravity="center"
+        android:paddingLeft="12dp"
+        android:paddingTop="6dp"
+        android:paddingRight="12dp"
+        android:paddingBottom="6dp"
+        android:text="@string/pcview_host_options_hint"
+        android:textColor="#B3FFFFFF"
+        android:textSize="14sp" />
 
 </RelativeLayout>

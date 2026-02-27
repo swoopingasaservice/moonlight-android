@@ -743,15 +743,9 @@ public class ComputerManagerService extends Service {
             networkCallback = new ConnectivityManager.NetworkCallback() {
                 @Override
                 public void onAvailable(Network network) {
-                    LimeLog.info("Resetting PC state for new available network");
-                    synchronized (pollingTuples) {
-                        for (PollingTuple tuple : pollingTuples) {
-                            tuple.computer.state = ComputerDetails.State.UNKNOWN;
-                            if (listener != null) {
-                                listener.notifyComputerUpdated(tuple.computer);
-                            }
-                        }
-                    }
+                    // Android TV emulators can emit frequent onAvailable callbacks.
+                    // Avoid forcing hosts into UNKNOWN here to prevent constant UI "Refreshing" churn.
+                    LimeLog.info("Network became available; keeping host states until next poll");
                 }
 
                 @Override

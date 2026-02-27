@@ -15,6 +15,7 @@
     <string name="pcview_menu_header_online">Online</string>
     <string name="pcview_menu_header_offline">Offline</string>
     <string name="pcview_menu_header_unknown">Refreshing</string>
+    <string name="pcview_status_pair_required">Pair Required</string>
     <string name="pcview_menu_app_list">View All Apps</string>
     <string name="pcview_menu_pair_pc">Pair with PC</string>
     <string name="pcview_menu_unpair_pc">Unpair</string>
@@ -97,6 +98,8 @@
     <string name="ip_hint">IP address of host PC</string>
     <string name="searching_pc">Searching for host PCs on your local network…\n\n
         Ensure Sunshine is running on your host PC or GameStream is enabled in the GeForce Experience SHIELD settings.</string>
+    <string name="searching_pc_hint">Tip: Press the + button to add a host manually.</string>
+    <string name="pcview_host_options_hint">OK: Connect    Hold OK: Host options</string>
     <string name="yes">Yes</string>
     <string name="no">No</string>
     <string name="lost_connection">Lost connection to PC</string>

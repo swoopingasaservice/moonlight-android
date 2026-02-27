@@ -186,7 +186,9 @@ public class AddComputerManually extends Activity {
         else if (!success) {
             String dialogText;
             if (portTestResult != MoonBridge.ML_TEST_RESULT_INCONCLUSIVE && portTestResult != 0)  {
-                dialogText = getResources().getString(R.string.nettest_text_blocked);
+                dialogText = getResources().getString(R.string.addpc_fail) + "\n\n" +
+                        getResources().getString(R.string.check_ports_msg) + "\n" +
+                        MoonBridge.stringifyPortFlags(portTestResult, ", ");
             }
             else {
                 dialogText = getResources().getString(R.string.addpc_fail);

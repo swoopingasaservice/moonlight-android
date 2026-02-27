@@ -3,6 +3,8 @@ package com.limelight;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.net.UnknownHostException;
+import java.security.cert.X509Certificate;
+import java.util.HashSet;
 
 import com.limelight.binding.PlatformBinding;
 import com.limelight.binding.crypto.AndroidCryptoProvider;
@@ -49,6 +51,7 @@ import android.view.View.OnClickListener;
 import android.widget.AbsListView;
 import android.widget.AdapterView;
 import android.widget.AdapterView.OnItemClickListener;
+import android.widget.AdapterView.OnItemLongClickListener;
 import android.widget.ImageButton;
 import android.widget.RelativeLayout;
 import android.widget.Toast;
@@ -60,11 +63,24 @@ import javax.microedition.khronos.egl.EGLConfig;
 import javax.microedition.khronos.opengles.GL10;
 
 public class PcView extends Activity implements AdapterFragmentCallbacks {
+    private static final long GRID_UPDATE_DEBOUNCE_MS = 120;
+    private static final long UNKNOWN_STATE_GRACE_MS = 3000;
     private RelativeLayout noPcFoundLayout;
     private PcGridAdapter pcGridAdapter;
     private ShortcutHelper shortcutHelper;
+    private final HashSet<String> cleanedHostShortcuts = new HashSet<>();
     private ComputerManagerService.ComputerManagerBinder managerBinder;
     private boolean freezeUpdates, runningPolling, inForeground, completeOnCreateCalled;
+    private boolean gridRefreshScheduled;
+    private final Runnable gridRefreshRunnable = new Runnable() {
+        @Override
+        public void run() {
+            gridRefreshScheduled = false;
+            if (pcGridAdapter != null) {
+                pcGridAdapter.notifyDataSetChanged();
+            }
+        }
+    };
     private final ServiceConnection serviceConnection = new ServiceConnection() {
         public void onServiceConnected(ComponentName className, IBinder binder) {
             final ComputerManagerService.ComputerManagerBinder localBinder =
@@ -119,6 +135,48 @@ public class PcView extends Activity implements AdapterFragmentCallbacks {
     private final static int FULL_APP_LIST_ID = 9;
     private final static int TEST_NETWORK_ID = 10;
     private final static int GAMESTREAM_EOL_ID = 11;
+
+    private static boolean isHostPaired(ComputerDetails details) {
+        return details != null &&
+                (details.pairState == PairState.PAIRED || details.serverCert != null);
+    }
+
+    private void markComputerPairedLocally(ComputerDetails details, X509Certificate pairedCert) {
+        if (details == null || details.uuid == null) {
+            return;
+        }
+
+        for (int i = 0; i < pcGridAdapter.getCount(); i++) {
+            ComputerObject computer = (ComputerObject) pcGridAdapter.getItem(i);
+            if (details.uuid.equals(computer.details.uuid)) {
+                computer.details.pairState = PairState.PAIRED;
+                if (pairedCert != null) {
+                    computer.details.serverCert = pairedCert;
+                }
+                if (computer.details.state == ComputerDetails.State.UNKNOWN) {
+                    computer.details.state = ComputerDetails.State.ONLINE;
+                }
+                break;
+            }
+        }
+        pcGridAdapter.notifyDataSetChanged();
+    }
+
+    private void markComputerUnpairedLocally(ComputerDetails details) {
+        if (details == null || details.uuid == null) {
+            return;
+        }
+
+        for (int i = 0; i < pcGridAdapter.getCount(); i++) {
+            ComputerObject computer = (ComputerObject) pcGridAdapter.getItem(i);
+            if (details.uuid.equals(computer.details.uuid)) {
+                computer.details.pairState = PairState.NOT_PAIRED;
+                computer.details.serverCert = null;
+                break;
+            }
+        }
+        pcGridAdapter.notifyDataSetChanged();
+    }
 
     private void initializeViews() {
         setContentView(R.layout.activity_pc_view);
@@ -262,8 +320,10 @@ public class PcView extends Activity implements AdapterFragmentCallbacks {
                         });
 
                         // Add a launcher shortcut for this PC (off the main thread to prevent ANRs)
-                        if (details.pairState == PairState.PAIRED) {
-                            shortcutHelper.createAppViewShortcutForOnlineHost(details);
+                        if (details.uuid != null && cleanedHostShortcuts.add(details.uuid)) {
+                            // We used to auto-publish per-host launcher shortcuts/channels.
+                            // Disable those once so Moonlight remains a single launcher entry.
+                            shortcutHelper.disableComputerShortcut(details, getString(R.string.scut_deleted_pc));
                         }
                     }
                 }
@@ -316,6 +376,10 @@ public class PcView extends Activity implements AdapterFragmentCallbacks {
 
         inForeground = false;
         stopComputerUpdates(false);
+        if (noPcFoundLayout != null) {
+            noPcFoundLayout.removeCallbacks(gridRefreshRunnable);
+        }
+        gridRefreshScheduled = false;
     }
 
     @Override
@@ -360,7 +424,7 @@ public class PcView extends Activity implements AdapterFragmentCallbacks {
             menu.add(Menu.NONE, WOL_ID, 1, getResources().getString(R.string.pcview_menu_send_wol));
             menu.add(Menu.NONE, GAMESTREAM_EOL_ID, 2, getResources().getString(R.string.pcview_menu_eol));
         }
-        else if (computer.details.pairState != PairState.PAIRED) {
+        else if (!isHostPaired(computer.details)) {
             menu.add(Menu.NONE, PAIR_ID, 1, getResources().getString(R.string.pcview_menu_pair_pc));
             if (computer.details.nvidiaServer) {
                 menu.add(Menu.NONE, GAMESTREAM_EOL_ID, 2, getResources().getString(R.string.pcview_menu_eol));
@@ -377,11 +441,12 @@ public class PcView extends Activity implements AdapterFragmentCallbacks {
             }
 
             menu.add(Menu.NONE, FULL_APP_LIST_ID, 4, getResources().getString(R.string.pcview_menu_app_list));
+            menu.add(Menu.NONE, UNPAIR_ID, 5, getResources().getString(R.string.pcview_menu_unpair_pc));
         }
 
-        menu.add(Menu.NONE, TEST_NETWORK_ID, 5, getResources().getString(R.string.pcview_menu_test_network));
-        menu.add(Menu.NONE, DELETE_ID, 6, getResources().getString(R.string.pcview_menu_delete_pc));
-        menu.add(Menu.NONE, VIEW_DETAILS_ID, 7,  getResources().getString(R.string.pcview_menu_details));
+        menu.add(Menu.NONE, TEST_NETWORK_ID, 6, getResources().getString(R.string.pcview_menu_test_network));
+        menu.add(Menu.NONE, DELETE_ID, 7, getResources().getString(R.string.pcview_menu_delete_pc));
+        menu.add(Menu.NONE, VIEW_DETAILS_ID, 8,  getResources().getString(R.string.pcview_menu_details));
     }
 
     @Override
@@ -409,6 +474,7 @@ public class PcView extends Activity implements AdapterFragmentCallbacks {
                 NvHTTP httpConn;
                 String message;
                 boolean success = false;
+                X509Certificate pairedCert = null;
                 try {
                     // Stop updates and wait while pairing
                     stopComputerUpdates(true);
@@ -420,6 +486,7 @@ public class PcView extends Activity implements AdapterFragmentCallbacks {
                         // Don't display any toast, but open the app list
                         message = null;
                         success = true;
+                        pairedCert = computer.serverCert;
                     }
                     else {
                         final String pinStr = PairingManager.generatePinString();
@@ -450,9 +517,14 @@ public class PcView extends Activity implements AdapterFragmentCallbacks {
                             // Just navigate to the app view without displaying a toast
                             message = null;
                             success = true;
+                            pairedCert = pm.getPairedCert();
 
                             // Pin this certificate for later HTTPS use
-                            managerBinder.getComputer(computer.uuid).serverCert = pm.getPairedCert();
+                            ComputerDetails managedComputer = managerBinder.getComputer(computer.uuid);
+                            if (managedComputer != null) {
+                                managedComputer.serverCert = pairedCert;
+                                managedComputer.pairState = PairState.PAIRED;
+                            }
 
                             // Invalidate reachability information after pairing to force
                             // a refresh before reading pair state again
@@ -476,6 +548,7 @@ public class PcView extends Activity implements AdapterFragmentCallbacks {
 
                 final String toastMessage = message;
                 final boolean toastSuccess = success;
+                final X509Certificate finalPairedCert = pairedCert;
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
@@ -484,6 +557,7 @@ public class PcView extends Activity implements AdapterFragmentCallbacks {
                         }
 
                         if (toastSuccess) {
+                            markComputerPairedLocally(computer, finalPairedCert);
                             // Open the app list after a successful pairing attempt
                             doAppList(computer, true, false);
                         }
@@ -572,9 +646,13 @@ public class PcView extends Activity implements AdapterFragmentCallbacks {
                 }
 
                 final String toastMessage = message;
+                final boolean unpairSuccess = getResources().getString(R.string.unpair_success).equals(message);
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
+                        if (unpairSuccess) {
+                            markComputerUnpairedLocally(computer);
+                        }
                         Toast.makeText(PcView.this, toastMessage, Toast.LENGTH_LONG).show();
                     }
                 });
@@ -726,8 +804,16 @@ public class PcView extends Activity implements AdapterFragmentCallbacks {
         }
 
         if (existingEntry != null) {
-            // Replace the information in the existing entry
-            existingEntry.details = details;
+            boolean incomingWasUnknown = details.state == ComputerDetails.State.UNKNOWN;
+            smoothTransientUnknownState(existingEntry, details);
+
+            if (!areComputerDetailsEqual(existingEntry.details, details)) {
+                // Replace the information in the existing entry only when data changed
+                existingEntry.details = details;
+                existingEntry.updateStateTracking(details, incomingWasUnknown);
+                scheduleGridRefresh();
+            }
+            return;
         }
         else {
             // Add a new entry
@@ -735,10 +821,75 @@ public class PcView extends Activity implements AdapterFragmentCallbacks {
 
             // Remove the "Discovery in progress" view
             noPcFoundLayout.setVisibility(View.INVISIBLE);
+
+            scheduleGridRefresh();
+        }
+    }
+
+    private void smoothTransientUnknownState(ComputerObject existingEntry, ComputerDetails incomingDetails) {
+        if (incomingDetails.state == ComputerDetails.State.UNKNOWN &&
+                existingEntry.lastStableState != ComputerDetails.State.UNKNOWN) {
+            if (existingEntry.firstUnknownTimestampMs == 0) {
+                existingEntry.firstUnknownTimestampMs = System.currentTimeMillis();
+            }
+
+            if ((System.currentTimeMillis() - existingEntry.firstUnknownTimestampMs) < UNKNOWN_STATE_GRACE_MS) {
+                // Polling can emit transient UNKNOWN updates between checks.
+                // Keep the last stable state briefly to avoid visible "Refreshing" flicker.
+                incomingDetails.state = existingEntry.lastStableState;
+            }
+        }
+    }
+
+    private void scheduleGridRefresh() {
+        if (noPcFoundLayout == null) {
+            return;
+        }
+        if (gridRefreshScheduled) {
+            return;
+        }
+        gridRefreshScheduled = true;
+        noPcFoundLayout.postDelayed(gridRefreshRunnable, GRID_UPDATE_DEBOUNCE_MS);
+    }
+
+    private static boolean stringEquals(String a, String b) {
+        return (a == null && b == null) || (a != null && a.equals(b));
+    }
+
+    private static boolean areAddressTuplesEqual(ComputerDetails.AddressTuple a, ComputerDetails.AddressTuple b) {
+        if (a == b) {
+            return true;
+        }
+        if (a == null || b == null) {
+            return false;
+        }
+        return stringEquals(a.address, b.address) && a.port == b.port;
+    }
+
+    private static boolean areComputerDetailsEqual(ComputerDetails a, ComputerDetails b) {
+        if (a == b) {
+            return true;
+        }
+        if (a == null || b == null) {
+            return false;
         }
 
-        // Notify the view that the data has changed
-        pcGridAdapter.notifyDataSetChanged();
+        return a.state == b.state &&
+                a.pairState == b.pairState &&
+                a.runningGameId == b.runningGameId &&
+                a.httpsPort == b.httpsPort &&
+                a.externalPort == b.externalPort &&
+                a.nvidiaServer == b.nvidiaServer &&
+                stringEquals(a.name, b.name) &&
+                stringEquals(a.uuid, b.uuid) &&
+                stringEquals(a.macAddress, b.macAddress) &&
+                ((a.serverCert == null && b.serverCert == null) ||
+                        (a.serverCert != null && a.serverCert.equals(b.serverCert))) &&
+                areAddressTuplesEqual(a.localAddress, b.localAddress) &&
+                areAddressTuplesEqual(a.remoteAddress, b.remoteAddress) &&
+                areAddressTuplesEqual(a.manualAddress, b.manualAddress) &&
+                areAddressTuplesEqual(a.ipv6Address, b.ipv6Address) &&
+                areAddressTuplesEqual(a.activeAddress, b.activeAddress);
     }
 
     @Override
@@ -748,8 +899,9 @@ public class PcView extends Activity implements AdapterFragmentCallbacks {
 
     @Override
     public void receiveAbsListView(AbsListView listView) {
-        listView.setAdapter(pcGridAdapter);
-        listView.setOnItemClickListener(new OnItemClickListener() {
+        final AbsListView hostListView = listView;
+        hostListView.setAdapter(pcGridAdapter);
+        hostListView.setOnItemClickListener(new OnItemClickListener() {
             @Override
             public void onItemClick(AdapterView<?> arg0, View arg1, int pos,
                                     long id) {
@@ -757,8 +909,8 @@ public class PcView extends Activity implements AdapterFragmentCallbacks {
                 if (computer.details.state == ComputerDetails.State.UNKNOWN ||
                     computer.details.state == ComputerDetails.State.OFFLINE) {
                     // Open the context menu if a PC is offline or refreshing
-                    openContextMenu(arg1);
-                } else if (computer.details.pairState != PairState.PAIRED) {
+                    arg0.showContextMenuForChild(arg1);
+                } else if (!isHostPaired(computer.details)) {
                     // Pair an unpaired machine by default
                     doPair(computer.details);
                 } else {
@@ -766,18 +918,42 @@ public class PcView extends Activity implements AdapterFragmentCallbacks {
                 }
             }
         });
-        UiHelper.applyStatusBarPadding(listView);
-        registerForContextMenu(listView);
+        hostListView.setOnItemLongClickListener(new OnItemLongClickListener() {
+            @Override
+            public boolean onItemLongClick(AdapterView<?> parent, View view, int position, long id) {
+                // Keep host management actions (unpair/delete/details/etc.) available via long-press/right-click.
+                return false;
+            }
+        });
+        UiHelper.applyStatusBarPadding(hostListView);
+        registerForContextMenu(hostListView);
     }
 
     public static class ComputerObject {
         public ComputerDetails details;
+        public ComputerDetails.State lastStableState;
+        public long firstUnknownTimestampMs;
 
         public ComputerObject(ComputerDetails details) {
             if (details == null) {
                 throw new IllegalArgumentException("details must not be null");
             }
             this.details = details;
+            this.lastStableState = details.state;
+            this.firstUnknownTimestampMs = 0;
+            updateStateTracking(details, details.state == ComputerDetails.State.UNKNOWN);
+        }
+
+        public void updateStateTracking(ComputerDetails updatedDetails, boolean incomingWasUnknown) {
+            if (incomingWasUnknown) {
+                if (firstUnknownTimestampMs == 0) {
+                    firstUnknownTimestampMs = System.currentTimeMillis();
+                }
+            }
+            else {
+                lastStableState = updatedDetails.state;
+                firstUnknownTimestampMs = 0;
+            }
         }
 
         @Override
